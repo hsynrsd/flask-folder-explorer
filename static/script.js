@@ -1,112 +1,28 @@
 document.addEventListener('DOMContentLoaded', () => {
     const token = sessionStorage.getItem('token');
     if (!token) {
-        document.getElementById('login-modal').style.display = 'flex';
+        showLoginModal();
     } else {
         loadFiles();
     }
 });
 
+// Helper functions
 function getFileIcon(filename) {
     const ext = filename.split('.').pop().toLowerCase();
-    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg'];
-    const audioTypes = ['mp3', 'wav', 'ogg', 'm4a'];
-    const videoTypes = ['mp4', 'mov', 'avi', 'mkv'];
-    const archiveTypes = ['zip', 'rar', 'tar', 'gz'];
-    const codeTypes = ['js', 'py', 'html', 'css', 'json', 'xml'];
-    const docTypes = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+    const iconMap = {
+        image: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg'],
+        audio: ['mp3', 'wav', 'ogg', 'm4a'],
+        video: ['mp4', 'mov', 'avi', 'mkv'],
+        archive: ['zip', 'rar', 'tar', 'gz'],
+        code: ['js', 'py', 'html', 'css', 'json', 'xml'],
+        document: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']
+    };
 
-    if (imageTypes.includes(ext)) return '/static/icons/image.png';
-    if (audioTypes.includes(ext)) return '/static/icons/audio.png';
-    if (videoTypes.includes(ext)) return '/static/icons/video.png';
-    if (archiveTypes.includes(ext)) return '/static/icons/archive.png';
-    if (codeTypes.includes(ext)) return '/static/icons/code.png';
-    if (docTypes.includes(ext)) return '/static/icons/pdf.png';
+    for (const [type, exts] of Object.entries(iconMap)) {
+        if (exts.includes(ext)) return `/static/icons/${type}.png`;
+    }
     return '/static/icons/default.png';
-}
-
-document.getElementById('login-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const token = document.getElementById('token-input').value.trim();
-    
-    // Verify token is not empty
-    if (!token) {
-        alert('Please enter a token');
-        return;
-    }
-    
-    // Store token in sessionStorage
-    sessionStorage.setItem('token', token);
-    console.log("Token stored:", token);  // Debug line
-    
-    // Hide login modal
-    document.getElementById('login-modal').style.display = 'none';
-    
-    // Load files
-    loadFiles();
-});
-
-document.getElementById('upload-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const fileInput = document.getElementById('file-input');
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-
-    // Add token to the FormData
-    formData.append('token', sessionStorage.getItem('token'));
-
-    fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        if (response.ok) {
-            fileInput.value = '';
-            loadFiles();
-        } else {
-            alert('Upload failed');
-        }
-    });
-});
-
-function loadFiles() {
-    fetch(`/api/files?token=${sessionStorage.getItem('token')}`)
-        .then(response => response.json())
-        .then(files => {
-            const tbody = document.getElementById('file-table-body');
-            tbody.innerHTML = '';
-            
-            files.forEach(file => {
-                const row = document.createElement('tr');
-                const icon = getFileIcon(file.name);
-                
-                row.innerHTML = `
-                    <td>
-                        <img src="${icon}" alt="File icon" class="file-icon">
-                        <a href="/api/download/${encodeURIComponent(file.name)}?token=${sessionStorage.getItem('token')}">${file.name}</a>
-                    </td>
-                    <td>${formatFileSize(file.size)}</td>
-                    <td>${file.modification_date}</td>
-                    <td><button onclick="deleteFile('${encodeURIComponent(file.name)}')">Delete</button></td>
-                `;
-                tbody.appendChild(row);
-            });
-        });
-}
-
-function deleteFile(filename) {
-    if (confirm(`Are you sure you want to delete ${filename}?`)) {
-        fetch(`/api/files/${filename}?token=${sessionStorage.getItem('token')}`, {
-            method: 'DELETE'
-        })
-        .then(response => {
-            if (response.ok) {
-                loadFiles();
-            } else {
-                alert('Delete failed');
-            }
-        });
-    }
 }
 
 function formatFileSize(bytes) {
@@ -115,4 +31,211 @@ function formatFileSize(bytes) {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function showLoginModal(message = '') {
+    if (message) {
+        document.getElementById('login-message').textContent = message;
+    }
+    document.getElementById('login-modal').style.display = 'flex';
+}
+
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// Event handlers
+document.getElementById('login-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const token = document.getElementById('token-input').value.trim();
+    
+    if (!token) {
+        alert('Please enter a token');
+        return;
+    }
+    
+    // Verify token with server
+    try {
+        const response = await fetch('/api/verify-token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Invalid token');
+        }
+
+        sessionStorage.setItem('token', token);
+        document.getElementById('login-modal').style.display = 'none';
+        loadFiles();
+    } catch (error) {
+        alert('Invalid token. Please try again.');
+        console.error('Login error:', error);
+    }
+});
+
+document.getElementById('upload-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const fileInput = document.getElementById('file-input');
+    const token = sessionStorage.getItem('token');
+    
+    if (!token) {
+        showLoginModal('Please login to upload files');
+        return;
+    }
+
+    if (!fileInput.files[0]) {
+        showToast('Please select a file to upload', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    try {
+        const response = await fetch('/api/upload', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            if (response.status === 401) {
+                handleSessionExpired();
+                return;
+            }
+            throw new Error(await response.text());
+        }
+
+        fileInput.value = '';
+        await loadFiles();
+        showToast('File uploaded successfully');
+    } catch (error) {
+        console.error('Upload error:', error);
+        showToast('Upload failed: ' + error.message, 'error');
+    }
+});
+
+// File operations
+async function loadFiles() {
+    const token = sessionStorage.getItem('token');
+    if (!token) {
+        showLoginModal();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/files', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            if (response.status === 401) {
+                handleSessionExpired();
+                return;
+            }
+            throw new Error('Failed to load files');
+        }
+
+        const files = await response.json();
+        const tbody = document.getElementById('file-table-body');
+        tbody.innerHTML = '';
+        
+        files.forEach(file => {
+            const row = document.createElement('tr');
+            const icon = getFileIcon(file.name);
+            
+            row.innerHTML = `
+                <td>
+                    <img src="${icon}" alt="File icon" class="file-icon">
+                    <a href="#" onclick="downloadFile('${encodeURIComponent(file.name)}'); return false;">
+                        ${file.name}
+                    </a>
+                </td>
+                <td>${formatFileSize(file.size)}</td>
+                <td>${file.modification_date}</td>
+                <td><button onclick="deleteFile('${encodeURIComponent(file.name)}')">Delete</button></td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Error loading files:', error);
+        showToast('Failed to load files', 'error');
+    }
+}
+
+async function downloadFile(filename) {
+    const token = sessionStorage.getItem('token');
+    try {
+        const response = await fetch(`/api/download/${filename}`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            if (response.status === 401) {
+                handleSessionExpired();
+                return;
+            }
+            throw new Error('Download failed');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error('Download error:', error);
+        showToast('Download failed', 'error');
+    }
+}
+
+async function deleteFile(filename) {
+    if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
+
+    const token = sessionStorage.getItem('token');
+    try {
+        const response = await fetch(`/api/files/${filename}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            if (response.status === 401) {
+                handleSessionExpired();
+                return;
+            }
+            throw new Error('Delete failed');
+        }
+
+        await loadFiles();
+        showToast('File deleted successfully');
+    } catch (error) {
+        console.error('Delete error:', error);
+        showToast('Delete failed', 'error');
+    }
+}
+
+function handleSessionExpired() {
+    sessionStorage.removeItem('token');
+    showLoginModal('Your session has expired. Please login again.');
 }

@@ -5,51 +5,64 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from pathlib import Path
 from mega import Mega
+from functools import wraps
 
-MEGA_EMAIL = os.getenv('MEGA_EMAIL')
-MEGA_PASSWORD = os.getenv('MEGA_PASSWORD')
-
+# Load environment variables
 load_dotenv(override=True)
-
-env_path = Path(__file__).parent / '.env'
-load_dotenv(dotenv_path=env_path, override=True)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'shared_files'
 app.config['TOKEN'] = os.environ.get('TOKEN')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB limit
 
-# Add debug print to verify
-print(f"Token loaded from .env: '{app.config['TOKEN']}'")
+# Mega.nz configuration
+MEGA_EMAIL = os.getenv('MEGA_EMAIL')
+MEGA_PASSWORD = os.getenv('MEGA_PASSWORD')
 
-if 'TOKEN' not in os.environ:
-    raise ValueError("TOKEN not found in environment variables. Check your .env file")
+# Ensure upload directories exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs('temp_uploads', exist_ok=True)
 
-@app.before_request
-def check_token():
-    if request.path.startswith('/api'):
-        token = request.args.get('token')
-        print(f"Received token: '{token}'")  # Debug output
-        print(f"Expected token: '{app.config['TOKEN']}'")  # Debug output
+def token_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return jsonify({'error': 'Authorization header missing'}), 401
+        
+        try:
+            token = auth_header.split(' ')[1]
+        except IndexError:
+            return jsonify({'error': 'Bearer token malformed'}), 401
         
         if token != app.config['TOKEN']:
-            print("Token mismatch!")  # Debug output
-            return jsonify({'error': 'Unauthorized'}), 401
+            return jsonify({'error': 'Invalid token'}), 401
+        
+        return f(*args, **kwargs)
+    return decorated_function
 
-@app.route('/debug/env')
-def debug_env():
-    return {
-        'env_file_exists': Path('.env').exists(),
-        'TOKEN_in_env': 'TOKEN' in os.environ,
-        'TOKEN_value': os.environ.get('TOKEN'),
-        'flask_config_token': app.config.get('TOKEN')
-    }
-    
 @app.route('/')
 def index():
     return render_template('index.html')
 
+@app.route('/api/verify-token', methods=['POST'])
+def verify_token():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return jsonify({'error': 'Authorization header missing'}), 401
+    
+    try:
+        token = auth_header.split(' ')[1]
+    except IndexError:
+        return jsonify({'error': 'Bearer token malformed'}), 401
+    
+    if token != app.config['TOKEN']:
+        return jsonify({'error': 'Invalid token'}), 401
+    
+    return jsonify({'message': 'Token is valid'}), 200
+
 @app.route('/api/files', methods=['GET'])
+@token_required
 def list_files():
     files = []
     for filename in os.listdir(app.config['UPLOAD_FOLDER']):
@@ -64,6 +77,7 @@ def list_files():
     return jsonify(files)
 
 @app.route('/api/upload', methods=['POST'])
+@token_required
 def upload_file():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
@@ -74,23 +88,31 @@ def upload_file():
     
     filename = secure_filename(file.filename)
     temp_path = os.path.join('temp_uploads', filename)
-    os.makedirs('temp_uploads', exist_ok=True)
     file.save(temp_path)
     
     try:
+        # Upload to Mega.nz
         mega = Mega()
         m = mega.login(MEGA_EMAIL, MEGA_PASSWORD)
         uploaded_file = m.upload(temp_path)
         
-        os.remove(temp_path)  # Clean up
+        # Also save locally
+        local_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        os.rename(temp_path, local_path)
+        
         return jsonify({
-            'message': 'File uploaded to Mega.nz',
-            'file_url': m.get_upload_link(uploaded_file)
+            'message': 'File uploaded successfully',
+            'file_url': m.get_upload_link(uploaded_file),
+            'filename': filename
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 @app.route('/api/files/<filename>', methods=['DELETE'])
+@token_required
 def delete_file(filename):
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if os.path.isfile(file_path):
@@ -99,6 +121,7 @@ def delete_file(filename):
     return jsonify({'error': 'File not found'}), 404
 
 @app.route('/api/download/<filename>')
+@token_required
 def download_file(filename):
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if os.path.isfile(file_path):
@@ -106,6 +129,4 @@ def download_file(filename):
     return jsonify({'error': 'File not found'}), 404
 
 if __name__ == '__main__':
-    if not os.path.exists(app.config['UPLOAD_FOLDER']):
-        os.makedirs(app.config['UPLOAD_FOLDER'])
     app.run(host='0.0.0.0', port=5000, debug=True)
