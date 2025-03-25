@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Manager</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div id="login-modal" class="modal">
+            <div class="modal-content">
+                <h2>Enter Access Token</h2>
+                <form id="login-form">
+                    <input type="password" id="token-input" required>
+                    <button type="submit">Submit</button>
+                </form>
+            </div>
+        </div>
+
+        <h1>File Manager</h1>
+        
+        <div class="upload-section">
+            <form id="upload-form">
+                <input type="file" id="file-input" required>
+                <button type="submit">Upload File</button>
+            </form>
+        </div>
+
+        <div class="file-list">
+            <h2>Files in Shared Folder</h2>
+            <table id="file-table">
+                <thead>
+                    <tr>
+                        <th>Filename</th>
+                        <th>Size</th>
+                        <th>Last Modified</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="file-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
