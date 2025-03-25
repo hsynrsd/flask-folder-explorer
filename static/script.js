@@ -20,9 +20,12 @@ function getFileIcon(filename) {
     };
 
     for (const [type, exts] of Object.entries(iconMap)) {
-        if (exts.includes(ext)) return `/static/icons/${type}.png`;
+        if (exts.includes(ext)) {
+            // Use relative path or base URL
+            return `${window.location.pathname.includes('index.html') ? '.' : ''}/static/icons/${type}.png`;
+        }
     }
-    return '/static/icons/default.png';
+    return `${window.location.pathname.includes('index.html') ? '.' : ''}/static/icons/default.png`;
 }
 
 function formatFileSize(bytes) {
@@ -212,26 +215,41 @@ async function deleteFile(filename) {
 
     const token = sessionStorage.getItem('token');
     try {
-        const response = await fetch(`/api/files/${filename}`, {
+        // First delete from your server
+        const deleteResponse = await fetch(`/api/files/${filename}`, {
             method: 'DELETE',
             headers: {
                 'Authorization': `Bearer ${token}`
             }
         });
 
-        if (!response.ok) {
-            if (response.status === 401) {
+        if (!deleteResponse.ok) {
+            if (deleteResponse.status === 401) {
                 handleSessionExpired();
                 return;
             }
-            throw new Error('Delete failed');
+            throw new Error('Delete from server failed');
+        }
+
+        // Then delete from MEGA.io
+        const megaDeleteResponse = await fetch('/api/mega/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ filename: filename })
+        });
+
+        if (!megaDeleteResponse.ok) {
+            throw new Error('Delete from MEGA.io failed');
         }
 
         await loadFiles();
-        showToast('File deleted successfully');
+        showToast('File deleted successfully from both server and MEGA.io');
     } catch (error) {
         console.error('Delete error:', error);
-        showToast('Delete failed', 'error');
+        showToast(`Delete failed: ${error.message}`, 'error');
     }
 }
 

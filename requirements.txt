@@ -1,0 +1,4 @@
+Flask==2.3.2
+python-dotenv==1.0.0
+mega.py==1.0.8
+Werkzeug==2.3.7
